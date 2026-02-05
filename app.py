@@ -16,17 +16,22 @@ if 'historico_btc' not in st.session_state: st.session_state['historico_btc'] = 
 if 'historico_eth' not in st.session_state: st.session_state['historico_eth'] = []
 if 'historico_sol' not in st.session_state: st.session_state['historico_sol'] = []
 
-# --- FUNÇÃO DE BUSCA (AwesomeAPI) ---
+# --- FUNÇÃO DE BUSCA (CoinCap API - Mais Estável) ---
 def pegar_dados():
-    # Busca BTC, ETH e SOL de uma vez só em Dólar
-    url = "https://economia.awesomeapi.com.br/last/BTC-USD,ETH-USD,SOL-USD"
+    url = "https://api.coincap.io/v2/assets?ids=bitcoin,ethereum,solana"
     try:
         response = requests.get(url)
-        dados = response.json()
+        dados = response.json()['data']
+        
+        # Organiza os dados em um dicionário simples
+        precos_dict = {}
+        for item in dados:
+            precos_dict[item['id']] = float(item['priceUsd'])
+            
         return {
-            "BTC": float(dados['BTCUSD']['bid']),
-            "ETH": float(dados['ETHUSD']['bid']),
-            "SOL": float(dados['SOLUSD']['bid'])
+            "BTC": precos_dict['bitcoin'],
+            "ETH": precos_dict['ethereum'],
+            "SOL": precos_dict['solana']
         }
     except:
         return None
@@ -46,7 +51,7 @@ while True:
         st.session_state['historico_eth'].append({'Hora': hora, 'Preço': precos['ETH']})
         st.session_state['historico_sol'].append({'Hora': hora, 'Preço': precos['SOL']})
 
-        # Mantém apenas os últimos 50 pontos para não pesar
+        # Limpeza de memória (Mantém últimos 50)
         for moeda in ['historico_btc', 'historico_eth', 'historico_sol']:
             if len(st.session_state[moeda]) > 50:
                 st.session_state[moeda].pop(0)
@@ -70,9 +75,8 @@ while True:
                 st.line_chart(df.set_index('Hora')['Preço'], height=400)
     
     else:
-        # Se der erro, avisa mas não quebra o site
         with placeholder.container():
-            st.warning("⏳ Atualizando dados... (Aguarde um momento)")
-
-    # Espera 5 segundos (Importante para não ser bloqueado de novo!)
-    time.sleep(5)
+            st.error("⚠️ Erro ao buscar dados. Tentando novamente...")
+            
+    # Espera 10 segundos (CoinCap pede um intervalo maior)
+    time.sleep(10)
