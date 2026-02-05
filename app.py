@@ -6,7 +6,7 @@ from datetime import datetime
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Crypto Monitor Pro", layout="wide")
-st.title("🪙 CryptoLive: Painel Multi-Moedas")
+st.title("🪙 CryptoLive: Painel Multi-Moedas (Blindado)")
 
 # --- MENU LATERAL ---
 opcao = st.sidebar.selectbox("Escolha o Gráfico Principal:", ["Bitcoin", "Ethereum", "Solana"])
@@ -16,43 +16,62 @@ if 'historico_btc' not in st.session_state: st.session_state['historico_btc'] = 
 if 'historico_eth' not in st.session_state: st.session_state['historico_eth'] = []
 if 'historico_sol' not in st.session_state: st.session_state['historico_sol'] = []
 
-# --- FUNÇÃO DE BUSCA (Modo Espião 🕵️‍♂️) ---
-def pegar_dados():
-    url = "https://api.coincap.io/v2/assets?ids=bitcoin,ethereum,solana"
-    
-    # Cabeçalho para fingir que somos um navegador comum (Disfarce)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
-    
+# --- FUNÇÃO 1: COINCAP (Principal) ---
+def buscar_coincap():
     try:
-        response = requests.get(url, headers=headers)
-        response.raise_for_status() # Avisa se der erro de conexão
+        url = "https://api.coincap.io/v2/assets?ids=bitcoin,ethereum,solana"
+        response = requests.get(url, timeout=5)
         dados = response.json()['data']
-        
-        precos_dict = {}
-        for item in dados:
-            precos_dict[item['id']] = float(item['priceUsd'])
-            
-        return {
-            "BTC": precos_dict['bitcoin'],
-            "ETH": precos_dict['ethereum'],
-            "SOL": precos_dict['solana']
-        }
-    except Exception as e:
-        # Mostra o erro exato na tela para a gente descobrir o que é
-        st.error(f"Ocorreu um erro: {e}")
+        precos = {item['id']: float(item['priceUsd']) for item in dados}
+        return {"BTC": precos['bitcoin'], "ETH": precos['ethereum'], "SOL": precos['solana'], "Fonte": "CoinCap"}
+    except:
         return None
+
+# --- FUNÇÃO 2: COINGECKO (Reserva) ---
+def buscar_coingecko():
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd"
+        response = requests.get(url, timeout=5)
+        dados = response.json()
+        return {"BTC": dados['bitcoin']['usd'], "ETH": dados['ethereum']['usd'], "SOL": dados['solana']['usd'], "Fonte": "CoinGecko"}
+    except:
+        return None
+
+# --- FUNÇÃO 3: BINANCE (Último Recurso) ---
+def buscar_binance():
+    try:
+        url = "https://api.binance.com/api/v3/ticker/price"
+        response = requests.get(url, timeout=5)
+        dados = response.json()
+        precos = {item['symbol']: float(item['price']) for item in dados if item['symbol'] in ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']}
+        return {"BTC": precos['BTCUSDT'], "ETH": precos['ETHUSDT'], "SOL": precos['SOLUSDT'], "Fonte": "Binance"}
+    except:
+        return None
+
+# --- GERENCIADOR DE FONTES ---
+def pegar_dados_inteligente():
+    # Tenta na ordem: CoinCap -> CoinGecko -> Binance
+    dados = buscar_coincap()
+    if dados: return dados
+    
+    dados = buscar_coingecko()
+    if dados: return dados
+    
+    dados = buscar_binance()
+    if dados: return dados
+    
+    return None
 
 # --- ÁREA DE ATUALIZAÇÃO ---
 placeholder = st.empty()
 
 # --- LOOP INFINITO ---
 while True:
-    precos = pegar_dados()
+    dados_api = pegar_dados_inteligente()
     
-    if precos:
+    if dados_api:
         hora = datetime.now().strftime("%H:%M:%S")
+        precos = dados_api # Simplificar nome
 
         # Salva nos históricos
         st.session_state['historico_btc'].append({'Hora': hora, 'Preço': precos['BTC']})
@@ -66,6 +85,9 @@ while True:
 
         # Desenha o Painel
         with placeholder.container():
+            # Mostra qual API está salvando a pátria
+            st.caption(f"🟢 Dados recebidos via: **{precos['Fonte']}**")
+            
             kpi1, kpi2, kpi3 = st.columns(3)
             kpi1.metric("💰 Bitcoin", f"US$ {precos['BTC']:,.2f}")
             kpi2.metric("💎 Ethereum", f"US$ {precos['ETH']:,.2f}")
@@ -81,8 +103,7 @@ while True:
                 st.line_chart(df.set_index('Hora')['Preço'], height=400)
     
     else:
-        # O erro já vai aparecer lá em cima pelo st.error
-        time.sleep(1) # Espera curtinha para não travar
+        with placeholder.container():
+            st.error("⚠️ Todas as APIs falharam. Verifique sua conexão.")
             
-    # Intervalo
     time.sleep(10)
